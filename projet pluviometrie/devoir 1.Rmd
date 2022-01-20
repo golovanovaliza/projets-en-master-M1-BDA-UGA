@@ -1,0 +1,246 @@
+---
+title: "Devoir 1"
+autor: 'Elizaveta Golovanova'
+fontsize: 12pt
+output:
+  pdf_document: default
+  #html_document:
+  #  code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(FactoMineR)
+library(xfun)
+
+```
+```{r, include=FALSE}
+options(tinytex.verbose = TRUE)
+```
+<font size="4" face = "Microsoft Yahei"> **1. Préparation des données et premiers traitements** 
+
+1) Chargement des données</font> 
+
+```{r}
+data_pluvio_France <- read.table("data_pluvio_France.csv", encoding="UTF-8",
+                                 sep=";", dec=".",header=TRUE,row.names=1)
+data_contour_France <- read.table("data_contour_france_continentale.csv",
+                                  encoding="UTF-8",sep=";", dec=".",
+                                  header=TRUE)
+head(data_pluvio_France, 3)
+```
+
+<font size="4" face = "Microsoft Yahei"> 2) Combien de stations météo sont présentes dans le fichier de pluviométrie ?  </font> 
+```{r}
+n = nrow(data_pluvio_France)
+cat("Il y a", n, "stations météo.")
+```
+
+<font size="4" face = "Microsoft Yahei"> 3) Préparer deux sous-tableaux : l\’un contenant les précipitations mensuelles (pluvio) et l\’autre contenant les nombres de jours de pluie par mois (njp). Préparer également la variable geo contenant la localisation géographique (est,nord,ouest,sud) des stations. </font> 
+  
+```{r}
+pluvio <- data_pluvio_France %>% select(ends_with("p"))
+head(pluvio, 3)
+njp <- data_pluvio_France %>% select(ends_with("pl"))
+head(njp, 3)
+geo <-data_pluvio_France$Geographie
+head(geo, 3)
+```
+<font size="4" face = "Microsoft Yahei"> 4) Calculer la moyenne et l'écart-type des précipitations mensuelles </font> 
+ 
+```{r}
+moyenne <-apply(pluvio,1,mean)
+moyenne
+ecartype<-apply(pluvio,1,sd) * sqrt((n-1)/n)
+ecartype
+```
+
+<font size="4" face = "Microsoft Yahei"> 5) Relever la pluviométrie mensuelle maximale et le lieu et le mois où elle se produit </font> 
+   
+```{r}
+pluvio %>% 
+  mutate(city = row.names(pluvio)) %>% 
+  pivot_longer(-city) %>% 
+  filter(value==max(value))
+```
+
+<font size="4" face = "Microsoft Yahei"> 6) Graphiques :  
+  • Tracer les boxplots correspondant au tableau pluvio 
+  
+ **Commentaire.** Il est à noter que pendant la période du printemps et de l'été, la dispersion des précipitations est moindre que pendant la période de l'automne et de l'hiver. Cependant, en moyenne, la quantité de précipitations est assez stable tout au long de l'année.</font> 
+
+```{r}
+
+df = pluvio %>% 
+  mutate(city = row.names(pluvio)) %>% 
+  pivot_longer(-city)
+df$name <- factor(df$name, levels = unique(df$name))
+df %>% 
+  ggplot() + aes(x = name, y = value) +
+  geom_boxplot() + theme_bw() + xlab("Mois") + ylab("Valeur") +
+  theme(legend.position="bottom", 
+        axis.text.x = element_text(size=8, angle=45, hjust = 1)) 
+```
+  
+<font size="4" face = "Microsoft Yahei"> • Tracer les faisceaux de courbes sur données brutes puis données centrées  
+
+ **Commentaire.** Les données centrées aident de voir clairement les mois avec la dispersion des précipitations maximale (novembre, juillet) et minimale (avril). Le Sud de la France présente la plus forte variation de précipitations pendant l'année par rapport aux autres régions. Il est à noter que les précipitations dans cette région sont les plus faibles en été et les plus élevées en automne pour toutes les villes tandis qu'il n'y a pas de division aussi claire dans les autres régions. </font> 
+  
+```{r}
+
+df_ <- data_pluvio_France %>% select(ends_with("p"), Geographie) 
+df = df_ %>% 
+  mutate(city = row.names(df_)) %>% 
+  pivot_longer(-c('city', 'Geographie'))
+
+df$name <- factor(df$name, levels = unique(df$name))
+
+df %>% 
+  ggplot(aes(x = name, y = value,
+             group = city, color = Geographie)) + 
+  geom_point() + geom_line() + theme_bw() + xlab("Mois") + ylab("Valeur") +
+  theme(legend.position="bottom", 
+        axis.text.x = element_text(size=8, angle=45, hjust = 1))
+
+
+df1 <- df %>% 
+  group_by(city) %>% 
+  mutate(moyenne = mean(value), value_cntr = value - moyenne)
+df1 %>% 
+  ggplot(aes(x = name, y = value_cntr, 
+             group = city, color = Geographie)) + 
+  geom_point() + geom_line() + theme_bw() + xlab("Mois") + ylab("Valeur") +
+  theme(legend.position="bottom", 
+        axis.text.x = element_text(size=8, angle=45, hjust = 1)) 
+```
+
+<font size="4" face = "Microsoft Yahei"> 7) Cartographie : Représenter les stations météo sur la carte de France </font>
+  
+
+```{r}
+ggplot() + 
+  geom_path(data = data_contour_France,
+            aes(x = LONGITUDE,y = LATITUDE), 
+            size = 0.5) + 
+  geom_point(data=data_pluvio_France, 
+             aes(x = Longitude, y = Latitude, col = Geographie), 
+             size = 5) +
+  geom_text(data=data_pluvio_France, 
+            aes(x = Longitude, y = Latitude,  
+                label=rownames(data_pluvio_France)), 
+            size = 4) + 
+  theme_minimal() +  
+  theme(panel.border = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.title = element_blank(),
+        axis.text=element_blank())
+```
+
+<font size="4" face = "Microsoft Yahei">**2. Analyse ACP à l’aide du package FactoMineR** </font>
+
+<font size="4" face = "Microsoft Yahei"> 1) Exécuter l’ACP normée des tableaux pluvio et njp.
+
+  • Afficher le résumé des résultats, commenter.
+ 
+**Commentaire.** 
+Dans le tableau avec les valeurs des individus, les valeurs de la colonne Dist indiquent la distance par rapport au centre de l'origine. On peut noter que Biarritz est très éloigné de l'origine, et il est, en fait, une point influent. 
+
+Dans le tableau avec les valeurs des variables et individus, les valeurs de la colonne Dim indiquent la contribution à la variance génerale de la composante principale. Ainsi, les variables à effet unidirectionnel et les grandes valeurs sont corrélées fortement entre elles. 
+
+La colonne ctr indique les valeurs centrées de la colonne Dim. 
+
+La colonne cos2 indique la qualité de la representation.
+</font>
+
+```{r}
+acp <- PCA(pluvio,scale.unit=T,graph=FALSE)
+summary(acp)
+
+acp1 <- PCA(njp,scale.unit=T,graph=FALSE)
+summary(acp1)
+```
+
+<font size="4" face = "Microsoft Yahei"> • Sélectionner et afficher les individus/variables bien représentés dans le premier plan factoriel </font>
+
+<font size="4" face = "Microsoft Yahei"> **Commentaire.** Sur le graphique des individus, sur le côté gauche se trouvent les villes où les précipitations sont les moins fréquentes, alors que sur le côté droit il se trouvent les villes les plus pluvieuses. Dans la partie inférieure du graphique se trouvent les villes où les pluies sont plus fréquentes en temps d'hiver, et dans la partie supérieure se trouvent les villes où les précipitations sont principalement en été.
+
+Sur le graphique des variables de tableaux pluvio, on peut voir que mai, juin, juillet et août sont séparés des autres mois. Ils définissent le deuxième composant alors que les mois restants définissent le premier composant. 
+
+En ce qui concerne les résultats pour la tableaux njp, la plupart de la variance de toutes les variables est expliquée par la première composante.
+
+</font>
+
+```{r}
+F<-acp$ind$coord[,1:3]
+G<-acp$var$coord[,1:3]
+
+plot.PCA(acp, choix="ind", axes = c(1, 2), select="cos2 0.75") 
+
+plot.PCA(acp, choix="var", axes = c(1, 2), select="cos2 0.85") 
+
+F<-acp1$ind$coord[,1:3]
+G<-acp1$var$coord[,1:3]
+
+plot.PCA(acp1, choix="ind", axes = c(1, 2), select="cos2 0.75")
+plot.PCA(acp1, choix="var", axes = c(1, 2), select="cos2 0.9")
+```
+
+ <font size="4" face = "Microsoft Yahei"> 2) Exécuter l’ACP normée du tableau pluvio avec en éléments supplémentaires : njp, geo et la station “Biarritz” </font>  
+ 
+<font size="4" face = "Microsoft Yahei"> • Afficher le résumé des résultats, commenter.
+  
+**Commentaire.** Lorsque nous avons enlevé le Biaritz, le premier composant a diminué en taille. </font>
+
+  
+```{r}
+oldw <- getOption("warn")
+
+options(warn = -1)
+
+df_sup <- data_pluvio_France %>% 
+  select(ends_with("pl"), ends_with("p"), Geographie) 
+brtz_row = which(rownames(pluvio) == "Biarritz")
+res.pca = PCA(df_sup,
+              scale.unit=T,
+              graph=FALSE,
+              quanti.sup=c(1:12),
+              quali.sup=c(25),
+              ind.sup = brtz_row)
+summary(res.pca)
+res.pca$ind$coord 
+options(warn = oldw)
+```
+
+<font size="4" face = "Microsoft Yahei"> 
+  • Sélectionner et afficher les individus/variables bien représentés dans le premier plan factoriel. </font> 
+ 
+```{r}
+plot.PCA(res.pca, axes=c(1, 2), choix="ind", habillage = 25, select="cos2 0.75")
+plot.PCA(res.pca, axes=c(1, 2), choix="var", select="cos2 0.85")
+```
+<font size="4" face = "Microsoft Yahei">  
+  • Ajouter les ellipses de dispersion 0.95 des groupes formés par la variable geo </font> 
+
+```{r}
+df <- as.data.frame(res.pca$ind$coord) %>%
+  cbind(res.pca[["call"]][["quali.sup"]][["quali.sup"]])
+ggplot(df, aes(x = `Dim.1`, y = `Dim.2`, color = Geographie)) + 
+  geom_point(size = 4) +
+  geom_text(label=rownames(df), color = 'black', size = 5, vjust = 1) +
+  theme_minimal() + 
+  stat_ellipse(geom="polygon", aes(fill = Geographie), 
+                      alpha = 0.2,
+                      show.legend = FALSE, 
+                      level = 0.95)
+
+```
+
+
+
+
