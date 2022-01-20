@@ -1,0 +1,401 @@
+---
+title: 'DOCTORATE RECIPIENTS FROM U.S. UNIVERSITIES '
+author: "Elizaveta Golovanova"
+date: "09/11/2021"
+output:
+  html_document: 
+    df_print: kable
+  pdf_document: default
+---
+
+```{r setup, message=FALSE, warning=FALSE, echo=FALSE}
+library(tidyverse)
+library(readxl)
+library(ggthemes)
+library(dplyr)
+library(scales)
+
+phd_field <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-02-19/phd_by_field.csv")
+
+sex_and_field <- read_excel("C:/Users/Кирилл/Documents/Intro-to-R-M1-C2ES-2021/Student Area/golovanovaliza/exam/Golovanova_supp1.xlsx",trim_ws = FALSE,skip=3) %>%
+  rename(`sex and fields` = `Sex and major field of study`) %>%
+  mutate(sex = case_when(
+    `sex and fields` =="All doctorate recipients" ~ "Total",
+    `sex and fields` =="Male" ~ "Male",
+    `sex and fields` =="Female" ~ "Female")
+    ) %>% fill(sex,.direction = 'down') %>% 
+    select(sex,`sex and fields`,lvl,everything(),-`% change 2008–17`)
+ 
+sex_and_race_total <- read_excel("C:/Users/Кирилл/Documents/Intro-to-R-M1-C2ES-2021/Student Area/golovanovaliza/exam/Golovanova_supp2.xlsx",trim_ws = FALSE,skip=3)
+sex_and_race_total['Sexe'] = 'Total'
+sex_and_race_male <- read_excel("C:/Users/Кирилл/Documents/Intro-to-R-M1-C2ES-2021/Student Area/golovanovaliza/exam/Golovanova_supp3.xlsx",trim_ws = FALSE,skip=3)
+sex_and_race_male['Sexe'] = 'Male'
+sex_and_race_female <- read_excel("C:/Users/Кирилл/Documents/Intro-to-R-M1-C2ES-2021/Student Area/golovanovaliza/exam/Golovanova_supp4.xlsx",trim_ws = FALSE,skip=3)
+sex_and_race_female['Sexe'] = 'Female'
+
+sex_and_race <- rbind(sex_and_race_total, sex_and_race_male, sex_and_race_female) %>% rename(`Ethnicity_visa` = `Ethnicity, race, and citizenship status`)
+
+rank <- read_excel("C:/Users/Кирилл/Documents/Intro-to-R-M1-C2ES-2021/Student Area/golovanovaliza/exam/Golovanova_supp5.xlsx",trim_ws = FALSE,skip=3) 
+rank[3, 1] <- "China"
+rank[27, 1] <- "Russian Federation"
+
+```
+![](C:/Users/Кирилл/Documents/Intro-to-R-M1-C2ES-2021/Student Area/golovanovaliza/exam/phd.jpg)
+
+La base de données DOCTORATE RECIPIENTS FROM U.S. UNIVERSITIES collectée par le National Science Foundation permet d’observer le nombre de doctorats décernés aux États-Unis.
+
+Au total, cette base de données contient 72 tableaux différents, ce qui permet d'examiner cette thématique sous angles différents.
+
+Mon étude porte principalement sur le tableau PhDs Awarded by Field. Ses données contiennent les données sur le numéro des doctorats par des domaines scientifiques généraux, des domaines scientifiques majeurs et décomposition détaillée de tous les domaines scientifiques possibles de 2008 à 2017.
+
+À partir de cette base de données, on peut obtenir des informations supplémentaires sur le sexe des doctorats, leur race et le statut de visa aux États-Unis.
+
+Certaines données ont été collectées pendant une période plus longue, certaines pour un an seulement. Par exemple, les classements des doctorats aux États-Unis parmi les citoyens de différents pays n'existent que pour 2017.
+
+## Questions:
+
+##### **1. Combien des personnes ont obtenu le Ph.D. pendant 2008-2017? **
+```{r}
+sum(phd_field$n_phds, na.rm = T)
+```
+
+##### **2. Сombien il y a des doctorats dans chaque catégorie générale pour chaque année?**
+
+```{r dpi = 200}
+
+dt <- phd_field %>% 
+  group_by(broad_field, year) %>%
+  summarise(n_phds_per_year = sum(n_phds, na.rm = T), .groups = 'drop') %>% 
+  arrange(desc(n_phds_per_year))
+
+dt %>% ggplot(aes(x=year, y = n_phds_per_year, fill = broad_field)) + 
+  geom_bar(stat = "identity") + 
+  theme_minimal() + scale_x_continuous(breaks= pretty_breaks(), expand = c(0,0)) + 
+  scale_fill_brewer(palette = "PuBu") +
+  labs(x = NULL, y = NULL, fill = NULL) + ggtitle('Numero des doctorats par an divisé par \n domaines scientifiques généraux') + theme(plot.title = element_text(hjust = 0.5))
+```
+
+##### **3. Dans quels domaines sont les doctorats les plus fréquemment obtenus?**
+
+```{r}
+dt1 <- phd_field %>% 
+  group_by(major_field) %>%
+  summarise(n_total = as.integer(sum(n_phds, na.rm = T))) %>% 
+  mutate(taux = paste0(round(n_total/sum(n_total) * 100),"%")) %>%
+  arrange(desc(n_total))
+dt1[1:5,]
+```
+
+##### **4. Quelle domaines sont les plus diversifiées? **
+
+```{r dpi = 200}
+
+df <- phd_field %>% select(broad_field, field) %>% 
+  group_by(broad_field) %>% 
+  summarise(n=n()) %>% arrange(desc(n)) %>% 
+  mutate(prop = round(n / sum(n) *100))
+
+ggplot(df, aes(x="", y=n, fill=broad_field)) + 
+     geom_bar(stat="identity") + geom_text(aes(label = prop),position = position_stack(vjust = 0.5), size = 7, color = '#27272f') + 
+  coord_polar(theta = "y", start=0) +
+  scale_fill_brewer(palette='PuBu') + 
+  theme_minimal() + 
+  labs(x = NULL, y = NULL, fill = NULL) + 
+  ggtitle('La proportion des tous les domaines scientifiques \n possibles par des domaines scientifiques généraux') + 
+  theme(plot.title = element_text(hjust = 0.5)) +  
+  theme(axis.text = element_blank(),
+  panel.grid = element_blank())
+  
+```
+
+##### **5. Dans quels domaines majeurs la tendance vers les doctorats obtenus est-elle positive?**
+
+```{r fig.asp = 0.9, fig.width = 10} 
+df <- phd_field %>% 
+  group_by(year, major_field) %>%
+  summarise(n_total = sum(n_phds, na.rm = T), .groups = 'drop') 
+
+fields <- unique(df$major_field)
+
+coefs <-c()
+p <- c()
+for (i in 1:length(fields))
+  {
+  temp <- subset(df, major_field %in% fields[i]) 
+  x = c(1:nrow(temp))
+  reg = lm(temp$n_total~x)
+  coefs[i] <-c(reg$coefficients[2])
+  if (reg$coefficients[2]>0)
+    {
+      p[i] <- c(fields[i])
+    }
+}
+df1 <- df %>% filter(major_field %in% p)
+
+ggplot(df1, aes(year, n_total)) + geom_point() +
+                facet_wrap(~major_field, 
+                           nrow = 5, 
+                           labeller = label_wrap_gen(width=25), 
+                           scales = 'free') + 
+  geom_smooth(formula = y~x, method=lm, col='red', level=0.99) + theme_minimal() +
+  scale_x_continuous(breaks= pretty_breaks()) 
+```
+
+##### **6. Quelle est la proportion d'hommes et de femmes parmi ceux qui ont obtenu un doctorat?**
+```{r dpi=200}
+fm <- sex_and_field %>% select(-sex,-lvl) %>%
+  filter(`sex and fields` %in% c('Male','Female')) %>% 
+  rename(sex = 1)
+
+fm1 <- fm %>%
+  pivot_longer(-sex,names_to = 'year',values_to='phds') %>% 
+    pivot_wider(names_from = sex,values_from = 'phds')  
+
+fm1 %>% select(year,Male,Female) %>% 
+  pivot_longer(-year,names_to='sex',values_to='value') %>% 
+  ggplot(aes(x=as.numeric(year), y=value, color=sex)) + 
+
+  geom_line(size = 2) + theme_bw() +
+  scale_color_brewer(palette = "PuBu") +
+  theme(panel.border = element_blank()) + labs(x = 'year') +
+  scale_x_continuous(breaks= pretty_breaks()) 
+
+```
+
+##### **7. Lesquelles domaines généraux peuvent être considérés comme «masculins» ou «féminins»?**
+
+```{r dpi = 200}
+df <- sex_and_field %>% 
+  filter(
+    sex %in% c('Male','Female'),
+    `sex and fields` != 'Unknown field') %>%
+  rename(major_field = `sex and fields`)
+
+df %>% 
+  filter(lvl==1) %>% select(-lvl) %>%
+  pivot_longer(-c(major_field, sex), names_to = 'years', values_to = 'n_phds') %>%
+  ggplot(aes(as.numeric(years), n_phds, fill = sex)) +
+  geom_bar(stat = "identity",
+           position="fill") +
+  facet_wrap(~major_field, nrow = 3,labeller = label_wrap_gen(width=15)) +
+  scale_y_continuous(breaks = c(0,0.25,0.5,0.75,1),
+                     minor_breaks = NULL,
+                     labels = function(x) paste0(x*100, "%")) +
+  theme_minimal() +
+  scale_x_continuous(breaks= pretty_breaks()) +
+  labs(x = NULL,y="% of all phds",fill=NULL) +
+  scale_fill_brewer(palette='PuBu')
+```
+
+Parmi toutes les disciplines, les femmes sont les moins courantes, en moyenne, dans la domaine de l'ingénierie. Cependant, si on regarde une répartition plus détaillée, le plus grand nombre de femmes en moyenne seront en bio-ingénierie.
+
+```{r dpi = 200}
+df %>% 
+  filter(major_field %in% df$major_field[21:29]) %>% select(-lvl) %>%
+  pivot_longer(-c(major_field, sex), names_to = 'years', values_to = 'n_phds') %>%
+  ggplot(aes(as.numeric(years), n_phds, fill = sex)) +
+  geom_bar(stat = "identity",
+           position="fill") +
+  facet_wrap(~major_field, nrow = 3,labeller = label_wrap_gen(width=15)) +
+  scale_y_continuous(breaks = c(0,0.25,0.5,0.75,1),
+                     minor_breaks = NULL,
+                     labels = function(x) paste0(x*100, "%")) +
+  theme_minimal() +
+  scale_x_continuous(breaks= pretty_breaks()) +
+  labs(x = NULL,y="% of all phds",fill=NULL) +
+  scale_fill_brewer(palette='PuBu')
+
+```
+
+La sphère à prédominance féminine est l'éducation, et dans une répartition plus détaillée, on peut voir que la majorité des hommes sont dans l'administration de l'éducation.
+
+```{r dpi = 200}
+df %>% 
+  filter(major_field %in% df$major_field[30:35]) %>% select(-lvl) %>%
+  pivot_longer(-c(major_field, sex), names_to = 'years', values_to = 'n_phds') %>%
+  ggplot(aes(as.numeric(years), n_phds, fill = sex)) +
+  geom_bar(stat = "identity",
+           position="fill") +
+  facet_wrap(~major_field, nrow = 3,labeller = label_wrap_gen(width=15)) +
+  scale_y_continuous(breaks = c(0,0.25,0.5,0.75,1),
+                     minor_breaks = NULL,
+                     labels = function(x) paste0(x*100, "%")) +
+  theme_minimal() +
+  scale_x_continuous(breaks= pretty_breaks()) +
+  labs(x = NULL,y="% of all phds",fill=NULL) +
+  scale_fill_brewer(palette='PuBu')
+
+```
+
+##### **8. Est-ce qu'il y a la correlation entre le sexe et la tendance pour chaque domaine? ** 
+
+```{r}
+corr <- df %>% select(-lvl) %>% filter(major_field %in% fields) %>% pivot_longer(-c(major_field, sex), names_to = 'year', values_to = 'n_phds') %>%
+  pivot_wider(names_from=sex,values_from=n_phds) %>%
+  mutate(femme_share = Female/(Male+Female)) %>%
+  group_by(major_field) %>%
+  summarise(femme_share  = mean(femme_share , na.rm = T), .groups = 'drop')
+
+tendance <- ifelse(coefs > 0,1,0)
+
+cor.test(tendance, corr$femme_share)
+
+```
+Cette valeur ne dit rien sur une relation causale. Elle montre seulement que les domaines dans lesquels il y a plus de femmes connaissent actuellement une baisse du nombre de doctorats.
+
+
+##### **9. Quelle est la dynamique du nombre de doctorats obtenus par race? **
+
+```{r dpi = 200, warning=FALSE}
+sex_and_race %>% 
+  mutate(across(3:12,~as.numeric(.x))) %>% 
+  drop_na() %>% 
+  filter(lvl == 1, 
+         !Ethnicity_visa %in% c('All doctorate recipients', 'Ethnicity not reported',
+                                'More than one race', 'Other race or race not reported'),
+         Sexe == 'Total') %>% 
+  pivot_longer(-c(Ethnicity_visa, Sexe, lvl), names_to = 'year', values_to = 'n_phds') %>% ggplot(aes(x=as.numeric(year), n_phds, color = Ethnicity_visa)) + geom_line(size = 1) +
+                 theme_minimal() + labs(x = 'year', color = 'Race') +
+  scale_x_continuous(breaks= pretty_breaks()) 
+
+```
+
+
+##### **10. Combien de Français ont obtenu leur Ph.D aux États-Unis en 2017? **
+
+```{r fig.asp = 0.9, fig.width = 10}
+rank[3:nrow(rank),] %>%
+  ggplot(aes(y=reorder(`Country or economy`, `Doctorate recipients`), x=`Doctorate recipients`)) + geom_bar(stat="identity") + theme_bw() + 
+  labs(y = "Pays",
+       title = "Répartition des fréquences d'obtention des \n doctorats par pays") + theme(plot.title = element_text(hjust = 0.5), panel.border = element_blank()) +
+  geom_col(fill='#479dfa') + annotate("text", x = 300, y = 16, label = 107, color = 'red', size = 4) 
+
+```
+
+
+
+## Questions additionnelles
+
+### 1. Régressions Q5
+
+Pourriez-vous expliquer ce que votre code `for...` fait dans la réponse à la Q5? Quelle régression faites-vous? Pourquoi utiliser le `x` que vous construisez? Y a-t-il une façon de faire le même exercice en utilisant les outils qu'on a vu dans le cours 6? Essayez d'utiliser les résultats de vos régression pour tracer les droites du plot à la place de faire recous à un "smooth"; vous les avez calculés puis vous ne les utilisez pas!
+
+Reponse: Dans la cinquième question, je veux selectionner seulement une tendance positive. Pour ce faire, je dois realiser une régression sur temps et ne sélectionner que des coefficients positifs. En d'autres termes, en utilisant la régression sur x, j'extrait une tendance déterministe de toutes les séries disponibles. J'ai refait le code.
+
+```{r fig.asp = 0.9, fig.width = 10, warning=FALSE, message=FALSE} 
+
+library(data.table)
+
+df <- phd_field %>% 
+  group_by(major_field,year) %>%
+  summarise(n_total = sum(n_phds, na.rm = T), .groups = 'drop') 
+
+array <- with(df, by(df, major_field, function(df) lm(n_total~year, data=df)))
+a<-lapply(array, summary) ## list apply
+b<-sapply(a, coef)[2,] ## simplify apply
+p<-b[b>0]
+fit <- data.frame(lapply(array, fitted))
+
+df['values'] = melt(setDT(fit))$value   
+df1 <- df %>% filter(major_field %in% rownames(data.frame(p)))
+
+ggplot(df1, aes(year, n_total)) + geom_point() +
+                facet_wrap(~major_field, 
+                           nrow = 5, 
+                           labeller = label_wrap_gen(width=25), 
+                           scales = 'free') + 
+   geom_line(aes(x=year, y = values), color = "red") +
+  scale_x_continuous(breaks= pretty_breaks()) 
+```
+
+### 2.  Repartition H/F: améliorations et dotplot de la différence
+
+Il est possible de faire une visualisation plus claire des répartitions H/F selon les disciplines. Partez du constat qu'il n'y a presque pas d'évolution temporelle, et prenez une seule valeur (par ex la dernière année disponible, ou la moyenne, rien ne change parce que c'est plat). Puis pensez à faire un plot dans ce style: https://static01.nyt.com/images/2021/03/24/multimedia/24-GENDER-EARNINGSGAP_RACE/24-GENDER-EARNINGSGAP_RACE-mobileMasterAt3x.png ou bien https://econlife.com/wp-content/uploads/2016/07/Dr__Paid_Less__An_Old_Title_Still_Fits_Female_Physicians_-_The_New_York_Times.png 
+C'est à dire un "dotplot" qui montre pour chaque secteur (et sous-secteur) la différence homme/femme. Ce type de plots s'appellent aussi Dumbbell plots, examples ici: http://r-statistics.co/Top50-Ggplot2-Visualizations-MasterList-R-Code.html#3.%20Ranking
+
+
+```{r fig.asp = 0.9, fig.width = 10, message=FALSE, warning=FALSE}
+#install.packages("ggalt")
+library(ggalt)
+df <- sex_and_field %>% 
+  filter(
+    sex %in% c('Male','Female'),
+    `sex and fields` != 'Unknown field') %>%
+  rename(major_field = `sex and fields`)
+
+
+df[!(df %in% df[4:12])] %>% 
+  filter(lvl==1) %>% select(-lvl) %>% 
+  pivot_wider(names_from=sex,values_from=`2017`) %>%
+  mutate(diff = Male - Female) %>%
+  ggplot(aes(x=Female, xend = Male, y=major_field)) +
+        geom_dumbbell(size=1, color="#b2b2b2", 
+                         colour_x ="pink", colour_xend ="light blue",
+                      size_x = 3, size_xend = 3) + theme_minimal() +
+  geom_rect(aes(xmin=8000, xmax=9000, ymin=-Inf, ymax=Inf), fill="#efefe3") +
+  geom_text(aes(label=diff, y=major_field, x=8500), size=4) + 
+  geom_text(aes(x=8500, y=7.95, label="DIFF"),
+                     color="#7a7d7e", size=4, vjust=-2) +
+  labs(x=NULL, y=NULL, title="La différence homme/femme pour chaque secteur") +
+  scale_x_continuous(expand=c(0,0), limits=c(0, 9000)) +
+  theme(panel.grid.minor=element_blank(),
+        plot.title=element_text(face="bold"),
+        text = element_text(size=14)) 
+
+```
+
+
+### 3. Normalisation par population
+
+Serait-il possible de normaliser les données de la question 10 par population du pays? Les données de pop se trouvent par exemple dans la base de données `gapminder`. Refaites le plot normalisé. Quel pays a plus de PhD aux USA une fois qu'on tient en compte sa population? 
+
+Reponse: Malheureusement, cette base ne contient des données que jusqu'à 2007. J'ai aussi vérifié la base de données`wppExplorer`, mais l'année que j'ai besoin n'y était pas.
+Je ai trouvé de données pour 2017 sur le site de WorldBank https://databank.worldbank.org/reports.aspx?source=2&series=SP.POP.TOTL&country=#.
+
+
+```{r fig.asp = 0.9, fig.width = 10}
+pop<- read_excel("C:/Users/Кирилл/Documents/Intro-to-R-M1-C2ES-2021/Student Area/golovanovaliza/exam/Golovanova_population.xlsx")
+
+## There were different names of some countries 
+pop[104, 3] <- 'South Korea'
+pop[92, 3] <- "Iran"
+pop[59, 3] <- 'Egypt'
+
+## Here I eliminate quotes 
+countries <- rank[3:nrow(rank),] %>% select(`Country or economy`)
+a <- apply(countries,2,function(x) gsub(' ','', x)) 
+cntrs <- apply(a,2,function(x) sub('([A-Z][a-z]+)([A-Z][a-z]+)', "\\1 \\2", x))
+
+
+vec <- pop %>% 
+  select(`Country Name`, `2017 [YR2017]`) %>% 
+  filter(`Country Name` %in% cntrs) %>% 
+  rename(`Country or economy` = `Country Name`, '2017'= `2017 [YR2017]`)
+
+## Here I check the name of countries difference 
+taiwan <- data.frame(cntrs) %>% 
+  filter(!(Country.or.economy %in% vec$`Country or economy`))
+#There is no Taiwan in the dataset. From https://www.macrotrends.net/countries/TWN/taiwan/population I took the population info and added it manually 
+vec[nrow(vec) + 1,] = list('Taiwan','23674546')
+
+table<- rank[3:nrow(rank),]
+ordered1 <- table[order(table$`Country or economy`),]
+ordered2 <- vec[order(vec$`Country or economy`),]
+ordered1$`Country or economy` = ordered2$`Country or economy`
+
+population <-left_join(ordered1, ordered2, by = 'Country or economy')
+
+population$`2017`<- as.numeric(population$`2017`)
+population_ <- population %>% mutate(Doctorates_adj = `Doctorate recipients`/`2017` * 1000000)
+
+population_ %>% 
+  ggplot(aes(y=reorder(`Country or economy`, Doctorates_adj), x=Doctorates_adj)) +
+  geom_bar(stat="identity") + 
+  theme_bw() + 
+  labs(y = "Pays", x = 'Numéro des doctorats par 1 mln de population',
+       title = "Répartition des fréquences d'obtention des doctorats par pays \n en tenant  compte de la population") + 
+  theme(plot.title = element_text(hjust = 0.5), panel.border = element_blank()) +
+  geom_col(fill='#479dfa') + 
+  annotate("text", x = 3, y = 16, label = '1.6', color = 'red', size = 4) 
+```
+
