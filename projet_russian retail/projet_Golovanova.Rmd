@@ -1,0 +1,382 @@
+---
+title: "Prévision du commerce de détail russe agrégé à l'aide des principales composantes de Google Trends"
+author: "Elizaveta Golovanova"
+output:
+  pdf_document: 
+    latex_engine: xelatex
+  html_document: 
+    df_print: kable
+    fig_height: 6
+    fig_width: 10
+    theme: readable
+---
+
+```{r setup, message=FALSE, warning=FALSE, echo=FALSE}
+library(dplyr)
+library(readxl)
+library(bruceR)
+library(scales)
+library(reshape2)
+library(stats)
+library(tseries)
+library(kableExtra)
+
+## pour composantes principales
+library(FactoMineR)
+library(psych)
+library(qgraph)
+library(Rcpp)
+
+## pour les Elastic Net regressions
+library(glmnet)
+library(caret)
+
+macro <- read_xlsx("Macro data.xlsx", sheet = 3)
+macro_graph <- read_xlsx("Macro data.xlsx", sheet = 1)
+prod <- read_xlsx("prod.xlsx")
+neprod <- read_xlsx("neprod.xlsx")
+
+```
+<img src='https://adindex.ru/files2/publications/2018_11/175557_GettyImages-860491858-16-x-9-.jpg' width="1200"/> 
+   
+Les dépenses consacrées aux produits au détail alimentaires et non alimentaires  déterminent en grande partie la demande globale, dont la dynamique est fortement liée à la phase du cycle économique. En particulier, en période de crises profondes (comme l'actuelle pandémie mondiale), il est essentiel de stimuler la demande globale pour en sortir. À cet égard, il est intéressant d'identifier les variables qui pourraient expliquer la dynamique des ventes au détail et aider à les prévoir.  
+Outre les indicateurs macroéconomiques de base, les requêtes dans le moteur de recherche par groupes de produits peuvent être un outil important qui permet de suivre l'augmentation et la diminution de l'intérêt des utilisateurs. Il parait intéressant de savoir si les données de requête de recherche en Google aident à prédire les ventes au détail. Pour prendre en compte le maximum d'informations sur les requêtes dans la régression, on peut utiliser l’outil Google Trends. Mais la question se pose de savoir à quel point les demandes pour chaque groupe de produits sont similaires et est-ce qu’on peut réduire la dimension de nos trends en question.   
+  
+**Problématique**  
+
+Les données de recherche aident-elles à prédire les ventes au détail ?  
+  
+Pour résoudre ce problème, je vais considerer des modeles avec un ensemble des variables macroéconomiques clés qui expliquent la vente au détail de produits alimentaires et non alimentaires ainsi que les tendances de Google, pour améliorer les propriétés prédictives de ces modèles.  
+
+**Données et leur traitement**  
+
+La période de janvier 2015 à février 2021 inclus est considérée. Le tableau répertorie les variables macroéconomiques qui exercent une influence sur les ventes au détail. 
+
+| Variable                                                                 | Source                                                     |
+|--------------------------------------------------------------------------|------------------------------------------------------------|
+|Chiffre d'affaires des ventes au détail cumulées                          |https://rosstat.gov.ru/folder/23457                         |
+|Indice russe de volatilité                                                |https://ru.investing.com/indices/russian-vix                |
+|Indicateur de confiance des consommateurs                                 |https://wciom.ru/ratings/indeks-potrebitelskogo-doverija    |
+|Pétrole brut Brent                                                        |https://fred.stlouisfed.org/series/POILBREUSDM              |
+|Taux de change réel effectif                                              |https://fred.stlouisfed.org/series/RBRUBIS                  |
+|Indice américain des prix à la consommation (seulement   pour correction) |https://fred.stlouisfed.org/series/CPIAUCSL                 |
+
+Ci-dessous se trouvent des graphiques des données des variables macroeconomiques et leurs statistiques descriptives. Il est à noter qu'en avril 2020, en raison de la pandémie et du confinement, des valeurs minimales sont observées dans les ventes au détail non alimentaire, les prix du pétrole et l'indice de confiance des consommateurs.
+
+```{r}
+
+macro_graph <- macro_graph[, 1:7]
+
+df1<-macro_graph %>% pivot_longer(-date, names_to = 'names', values_to = 'values')
+ggplot(df1, aes(date, values)) + geom_line() +
+                facet_wrap(~names, 
+                           nrow = 2, 
+                           labeller = label_wrap_gen(width=25), 
+                           scales = 'free') + theme_minimal() + 
+  labs(x = NULL, y = NULL) 
+
+summary(macro_graph[2:length(macro_graph)])
+```
+Dans le tableau ci-dessous, la colonne gauche présente les catégories de produits alimentaires et non alimentaires. À droite, ils sont mappés aux catégories de Google Trends. J'ai décidé d'utiliser des catégories, car cela aidera à identifier l'intérêt général pour les produits en fonction de diverses requêtes. Dans le cas d'utilisation des mots-clés, il est évident que certains requêtes ne seront pas prises en compte. 
+Plusieurs catégories de produits alimentaires ne correspondaient pas aux tendances, quatre catégories de produits non alimentaires ne contenaient pas de données, mais la plupart des сatégories de vente au détail étaient comparable avec Google Trends. Ainsi, pour les ventes au détail alimentaires 7 tendances ont été sélectionné, et pour les non-alimentaires – 25. 
+  
+
+|     Ventes au détail alimentaires                                                                                                        |     Google Trends                                              |
+|------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------|
+|     Boissons alcoolisées                                                                                                                 |     Alcoholic   Beverages                                      |
+|     Confiserie, sucre                                                                                                                    |     Candy &   Sweets                                           |
+|     Pommes de terre   fraîches, fruits et légumes frais                                                                                  |     Fruits &   Vegetables                                      |
+|     Viande et poisson                                                                                                                    |     Meat &   Seafood                                           |
+|     Pain et produits de   boulangerie                                                                                                    |     Baked goods                                                |
+|     Thé                                                                                                                                  |     Coffee & Tea                                               |
+|     Produits du tabac                                                                                                                    |     Tobacco products                                           |
+|     Huiles et   graisses animales, huiles végétales, produits à base de margarine, produits   laitiers, œufs, farine, céréales, pâtes    |     Aucune catégorie appropriée                                |
+
+
+| Ventes au détail non-alimentaires                                                            | Google Trends                                         |
+|------------------------------------------------------------------------------------------|-------------------------------------------------------|
+| Tissus                                                                                   | Textiles & Nonwovens                                  |
+| Vêtements pour hommes, femmes et enfants, produits en fourrure                           | Children’s clothing, men’s clothing, women’s clothing |
+| Сhaussettes et collant                                                                   | Undergarments                                         |
+| Chaussure                                                                                | Footwear                                              |
+| Produits de nettoyage et de polissage synthétiques, savon de toilette et savon à lessive | Cleaning Supplies & Services                          |
+| Produits Cosmétiques et parfums autres que le savon                                      | Make-Up & Cosmetics, Perfumes & Fragrances            |
+| Montre                                                                                   | Watches (pas de données)                              |
+| Ordinateurs                                                                              | Computer Hardware                                     |
+| Téléphone portable                                                                       | Mobile phones                                         |
+| Matériel audio                                                                           | Audio equipment                                       |
+| Télévisions                                                                              | Televisions (pas de données)                          |
+| Magnétoscopes                                                                            | Video Players & Recorders (pas de données)            |
+| Revêtements de sol, tapis et moquettes                                                   | Rugs & Carpets                                        |
+| Meuble                                                                                   | Sofas & Chairs, Home Storage & Shelving               |
+| Matériaux de construction                                                                | Construction & Power Tools                            |
+| Bijouterie                                                                               | Gems & Jewellery (pas de données)                     |
+| Produits médicaux, produits orthopédiques                                                | Disabled & Special Needs                              |
+| Médicaments                                                                              | Drugs & Medications                                   |
+| Livres                                                                                   | Book Retailers                                        |
+| Journaux et magazines                                                                    | Magazines                                             |
+| Vélos                                                                                    | Bicycles & Accessories                                |
+| Motocycle                                                                                | Motorcycles                                           |
+| Voitures particulières                                                                   | Classic Vehicles                                      |
+| Essence automobile, carburant diesel, carburant à moteur à gaz                           | Vehicle Fuels & Lubricants                            |
+| Réfrigérateurs et congélateurs, machines à laver                                         | Major Kitchen Appliances                              |
+
+Google Trends fournit des fréquences relatives pour la catégorie sélectionnée et, en fonction de la période sélectionnée, met à l'échelle les données de 0 à 100. La valeur maximale correspond au plus grand nombre de requêtes, tandis que toutes les autres valeurs sont mises à l'échelle vers ce maximum. J’ai téléchargé tous les tendances sélectionnés depuis 2004 pour obtenir la véritable dynamique de la série. Je veux préciser que les données sont prises pour la Russie et pour les requêtes de recherche sur Internet (Web Search).  Les graphiques suivantes présentent des exemples des catégories alimentaires et non-alimentaires de Google Trends. On voit que la saisonnalité est observée qu'il faut supprimer avant estimation des données. 
+
+```{r fig.asp = 0.9, fig.width = 10}
+
+prod[1:4] %>% 
+  pivot_longer(-Date, names_to = 'names', values_to = 'values') %>%
+  filter(Date > '2015-01-01') %>%
+  ggplot(aes(Date , values, color = names)) + 
+  geom_line() + 
+  theme_minimal() + 
+  labs(color='Google Trends alimentaires') + theme(legend.position = c(0.15,0.92))
+
+
+neprod %>% 
+  select(c('Date', 'Computer Hardware', 'Construction & Power Tools')) %>%
+  pivot_longer(-Date, names_to = 'names', values_to = 'values') %>%
+  filter(Date > '2015-01-01') %>% 
+  ggplot(aes(Date , values, color = names)) +
+  geom_line() + 
+  theme_minimal() + 
+  labs(color='Google Trends non-alimentaires') + theme(legend.position = c(0.85,0.92))
+```
+ 
+Regardons maintenant la corrélation de nos Google Trends. Les matrices de corrélation sont présentées ci-dessous et le degré de corrélation des trends est mis en évidence en couleur. On peut voir que toutes les tendances alimentaires ont une corrélation positive modérée, lorsque des corrélations positives et négatives sont observées parmi les tendances non alimentaires. 
+ 
+```{r fig.asp = 0.9, fig.width = 10}
+prod_f <- prod %>% filter(Date >'2014-01-01')
+cormat <- round(cor(prod_f[,2:length(prod_f)]),2)
+  get_lower_tri<-function(cormat){
+    cormat[upper.tri(cormat, diag=TRUE)] <- NA
+    return(cormat)
+  }
+  
+lower_tri <- get_lower_tri(cormat)
+melted_cormat <- melt(lower_tri, na.rm = TRUE)
+ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile() + 
+  theme_minimal() + 
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab",
+   name="Pearson\nCorrelation") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, size = 10, hjust = 1)) +
+  labs(x = NULL, y = NULL)
+
+neprod_f <- neprod %>% filter(Date >'2014-01-01')
+cormat_neprod <- round(cor(neprod_f[,2:length(neprod_f)]),2)
+lower_tri <- get_lower_tri(cormat_neprod)
+melted_cormat <- melt(lower_tri, na.rm = TRUE)
+ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile() +
+  theme_minimal() + 
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0, 
+                       limit = c(-1,1), space = "Lab", name="Pearson\nCorrelation") + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, size = 10, hjust = 1)) + 
+  labs(x = NULL, y = NULL)
+```
+ 
+Intuitivement c'est clair qu'avec la popularité croissante d'Internet le nombre des requetes en ligne a augmenté aussi. Je vais effectuer des tests de stationnarité pour les séries Google Trends. Je vais utiliser le test Dickie-Fuller et le test KPSS (Kwiatkowski-Phillips-Schmidt-Shin). L'hypothèse nulle du premier test est que la série est non stationnaire. L'hypothèse nulle du deuxième test est que la série est stationnaire.
+ 
+```{r warning=FALSE}
+
+kable(prod %>% 
+ gather(Series, Value, -Date) %>%
+  group_by(Series) %>%
+   summarise(
+    adf.pvalue = adf.test(Value, alternative = "stationary")$p.value,  
+    adf = adf.test(Value, alternative = "stationary")$p.value<0.05,
+    kpss.pvalue=kpss.test(Value)$p.value,
+    kpss=kpss.test(Value)$p.value>0.05
+  ))
+
+kable(neprod %>% 
+ gather(Series, Value, -Date) %>%
+  group_by(Series) %>%
+   summarise(
+    adf.pvalue = adf.test(Value, alternative = "stationary")$p.value,  
+    adf = adf.test(Value, alternative = "stationary")$p.value<0.05,
+    kpss.pvalue=kpss.test(Value)$p.value,
+    kpss=kpss.test(Value)$p.value>0.05
+  ))
+
+```
+ 
+Pour les produits alimentaires, le test de Dickie-Fuller a montré que 5 des 7 séries étaient non stationnaires. Le test du KPSS a montré que toutes les séries sont non stationnaires. 
+
+Pour les produits non alimentaires, le test de Dickie-Fuller a révélé que 20 des 25 séries étaient non stationnaires. Le test du KPSS a également montré que toutes les séries sont non stationnaires. 
+
+Donc, je prends les données du mois au mois de l'année précédente et considère les séries en logarithmes. Ensuite, je supprime les données avant 2015 pour la comparabilité des calculs. 
+
+Toutes les données macroéconomiques sont aussi prises sous la forme d'un mois au mois de l'année précédente afin d'éliminer une composante saisonnière et une non-stationnarité possible. Les données sur le prix du pétrole sont ajustées à l'indice américain de prix à la consommation, dégagé de la saisonnalité (Calculs dans Excel). Toutes les séries sont considérées dans les logarithmes. Pour unification de dimension et comparabilité des erreurs de prévision je mets à l'échelle de 0 à 100 toutes les valeurs macroéconomiques considerés. 
+ 
+```{r}
+f <- function(x) scaler(x, min = 0, max = 100)
+macro_sc <- as.data.frame(sapply(macro[2:length(macro)], f))
+
+df <- log(prod[2:length(prod)])
+df2 <- data.frame(diff(as.matrix(df), differences = 12))
+df2['date'] = prod %>% filter(Date > '2005-01-01') %>% select('Date')
+prod_sc <- df2 %>% filter(date > '2015-01-01') %>% select(-'date')
+
+
+df <- log(neprod[2:length(neprod)])
+df2 <- data.frame(diff(as.matrix(df), differences = 12))
+df2['date'] = neprod %>% filter(Date > '2005-01-01') %>% select('Date')
+neprod_sc <- df2 %>% filter(date > '2015-01-01') %>% select(-'date')
+
+```
+ 
+Après les modifications des données, je vais faire à nouveau les tests. On voit que les deux tests signalent de la stationnarité des données.   
+  
+```{r warning=FALSE}
+kable(prod_sc %>% 
+ gather(Series, Value) %>%
+  group_by(Series) %>%
+   summarise(
+    adf.pvalue = adf.test(Value, alternative = "stationary")$p.value,  
+    adf = adf.test(Value, alternative = "stationary")$p.value<0.05,
+    kpss.pvalue=kpss.test(Value)$p.value,
+    kpss=kpss.test(Value)$p.value>0.05
+  ))
+
+kable(neprod_sc %>% 
+ gather(Series, Value) %>%
+  group_by(Series) %>%
+   summarise(
+    adf.pvalue = adf.test(Value, alternative = "stationary")$p.value,  
+    adf = adf.test(Value, alternative = "stationary")$p.value<0.05,
+    kpss.pvalue=kpss.test(Value)$p.value,
+    kpss=kpss.test(Value)$p.value>0.05
+  ))
+```
+
+Sur la base de l'existence d'une corrélation entre les tendances, je considérerai des modèles avec des composantes principales des tendances alimentaires et non alimentaires.
+
+**Analyse des composantes principales**  
+
+Dans l'analyse des composantes principales, différents critères sont utilisés pour choisir le nombre optimal de composantes. Sur la base du critère de Kaiser (Kaiser, 1960), seules les composantes dont les valeurs propres sont supérieures à 1 peuvent être gardés.
+
+```{r}
+## pour une meilleure compréhension de la visualisation
+names(prod_sc) <- gsub("[[:lower:]]|(\\.\\.)",'',names(prod_sc)) 
+acp <- PCA(prod_sc, scale.unit=T, graph=FALSE)
+summary(acp)
+scree(prod_sc, fa = FALSE, pc = TRUE)
+```
+    
+Dans le tableau des valeurs propres et sur la graphique ci-dessus, on voit que seule la première valeur propre satisfait au critère de Kaiser. Cependant, puisque la deuxième valeur propre est proche de 1, alors je le considérerai aussi. 
+
+
+```{r}
+## pour une meilleure compréhension de la visualisation
+names(neprod_sc) <- gsub("[[:lower:]]|(\\.\\.)",'',names(neprod_sc)) 
+acp <- PCA(neprod_sc, scale.unit=T, graph=FALSE)
+summary(acp)
+scree(neprod_sc, fa = FALSE, pc = TRUE)
+```
+  
+Dans ce cas, les 8 premiers composantes principales répondent au critère de Kaiser.
+  
+Aussi, dans l'analyse des composantes principales pour faciliter l'interprétation de ces composantes, une procédure de rotation d'axes est utilisée. Cette technique vise à obtenir un coefficient de corrélation le plus faible possible entre les composantes. L'une des techniques de rotation d'axe les plus populaires est la technique Varimax (Kaiser, 1958).
+
+```{r fig.asp = 0.9, fig.width = 10}
+pca_rot_p <- principal(prod_sc, nfactors=2, rotate="varimax")
+biplot.psych(pca_rot_p, col=c("black","red"), cex=c(0.7,1))
+
+qgraph_loadings_plot <- function(loadings_in, title) {
+  ld <- loadings(loadings_in)
+  qg_pca <- qgraph(ld, title=title, 
+                   posCol = "darkgreen", negCol = "darkmagenta", arrows = FALSE, 
+                   labels=attr(ld, "dimnames")[[1]])}
+qgraph_loadings_plot(pca_rot_p, "Principales composantes après rotation")
+
+```
+
+Il est possible maintenant d'observer quelles tendances sont contenues dans quels composantes. La première composante est principalement constituée de tendances `Alcogolic Beverages`, `Meat & Seafood` et `Fruits & Vegetables` et la seconde de tendance `Tobacco Products`. 
+
+
+```{r fig.asp = 0.9, fig.width = 10}
+pca_rot_np <- principal(neprod_sc, nfactors=8, rotate="varimax")
+biplot.psych(pca_rot_np, col=c("black","red"), cex=c(0.7,1), choose=c(1,4))
+qgraph_loadings_plot(pca_rot_np, "Principales composantes après rotation")
+```
+  
+Les produits non alimentaires sont hétérogènes et nombreux, mais pour la plupart des produits, il est possible d'observer une séparation les variables par composantes assez claire. 
+
+**Modèles avec les principales composantes.**
+
+Je vais maintenant essayer de construire un modèle Elastic Net dans le but d'obtenir une matrice creuse à partir de l'ensemble des données pour prévoir sur un échantillon de test de ventes au détail alimentaires et non alimentaires.
+Le meilleur modèle est défini comme le modèle qui a l'erreur de prédiction RMSE la plus faible.
+
+```{r}
+# Build the model
+pca_prod <- as.data.frame(sapply(as.data.frame(pca_rot_p$scores), f))
+
+set.seed(42)
+x = data.matrix(cbind(macro_sc, pca_prod) %>% select(-c(nonfood_goods)))
+n = round(nrow(x)*0.7)
+
+train.data <- x[1:n,]
+test.data<- x[n:nrow(x),]
+
+# Tuning Elastic Net Hyperparameters
+elastic <- train(
+  food_goods ~ ., data = train.data, method = "glmnet",
+  trControl = trainControl("cv", number = 10), ## set cross validation to 10 folders
+  tuneLength = 10
+  )
+# Model coefficients
+coef(elastic$finalModel, elastic$bestTune$lambda)
+# Make predictions
+predictions <- elastic %>% predict(test.data)
+# Model prediction performance
+data.frame(
+  RMSE = RMSE(predictions, test.data[,1]),
+  Rsquare = R2(predictions, test.data[,1])
+)
+```
+
+On voit que dans le meilleur modèle choisi par Elastic Net, seulment la deuxième composante joue un rôle. Ainsi, les requêtes de produits de tabac, qui sont correlés le plus avec la deuxième composante, ont un impact sur la dynamique des ventes au détail alimentaires. On peut dire, que des requêtes de boissons alcoolisées et de viande et de poisson ne l'affecte pratiquement pas.
+
+Interpretation du coefficient: Avec une augmentation de 1 de valuer de la deuxième composante, des ventes au détail augmentent de 1% toutes choses egales par ailleurs.
+
+```{r}
+# Build the model
+pca_neprod <- as.data.frame(sapply(as.data.frame(pca_rot_np$scores), f))
+set.seed(42)
+x = data.matrix(cbind(macro_sc, pca_neprod) %>% select(-c(food_goods)))
+n = round(nrow(x)*0.7)
+
+train.data <- x[1:n,]
+test.data<- x[n:nrow(x),]
+
+elastic <- train(
+  nonfood_goods ~ ., data = train.data, method = "glmnet",
+  trControl = trainControl("cv", number = 10),
+  tuneLength = 10
+  )
+# Model coefficients
+coef(elastic$finalModel, elastic$bestTune$lambda)
+# Make predictions
+predictions <- elastic %>% predict(test.data)
+# Model prediction performance
+data.frame(
+  RMSE = RMSE(predictions, test.data[,1]),
+  Rsquare = R2(predictions, test.data[,1])
+)
+```
+
+Dans ce cas, la deuxième composante était aussi significative. Elle comprend en majeure partie les tendances `Magazines`, `Motorcycles`, `Textiles & Nonwovens` et `Vehicle Fuels & Lubricants`. 
+
+Interpretation du coefficient: Avec une augmentation de 1 de valuer de la deuxième composante, des ventes au détail non alimentaires augmentent de 2.4% toutes choses egales par ailleurs.
+
+**Conclusion**
+
+Dans le cadre de ce projet, j'ai examiné l'impact des composantes principales de Google Trends sur les ventes au détail alimentaires et non alimentaires. Tout d'abord, j'ai comparé la liste des produits qui composent le commerce de détail russe agrégé avec des catégories existantes dans Google Trends. Puis j'ai examiné les corrélations appariées des tendances choisis et ai ensuite testé leur stationnarité. Après, j'ai sélectionné les composantes principales des Google Trends alimentaires et non alimentaires en utilisant le critère de Kaiser, et ai également appliqué la technique Varimax pour minimiser la corrélation entre eux. 
+
+J'ai ajouté les composantes résultants ainsi que les variables macroéconomiques au modèle Elastic Net. Les résultats ont montré que dans le modèle avec la plus petite erreur de prédiction (RMSE) pour les produits alimentaires, il y avait seulement une deuxième composante. Un poids important dans la deuxième composante tombe sur les produits du tabac. La deuxième composante est aussi présent dans le modèle pour les produits non alimentaires. Elle capture 4 tendances sur 25 examinées.
+
+Pour plus d'informations sur les données collectées et sur le sujet, veuillez chercher mon article dans le dossier envoyé.
